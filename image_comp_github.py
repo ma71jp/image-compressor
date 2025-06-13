@@ -1,38 +1,42 @@
-# image_compressor_batch.py
+# improved_image_compressor.py
 import streamlit as st
 from PIL import Image
 import io
 import zipfile
 
-st.title("画像一括圧縮ツール（最大30枚）")
-st.markdown("""
-複数画像を一度にアップロードして、圧縮してZIP形式でまとめてダウンロードできます。
-JPEG、PNG、BMP、TIFF、WebP に対応。
-""")
+st.set_page_config(page_title="画像一括圧縮ツール", layout="wide")
+st.title("📷 画像一括圧縮ツール")
+st.caption("※ 画像は保存されません。最大30枚、解像度そのまま。JPEG/PNG/BMP/WebP対応")
 
 uploaded_files = st.file_uploader(
-    "画像ファイルを選択してください（最大30枚）",
-    type=["jpg", "jpeg", "png", "bmp", "tiff", "webp"],
+    "📁 圧縮したい画像ファイルを選んでください（複数選択可）",
+    type=["jpg", "jpeg", "png", "bmp", "webp"],
     accept_multiple_files=True
 )
 
 if uploaded_files:
     if len(uploaded_files) > 30:
-        st.error("⚠ 最大30枚までアップロードできます。")
+        st.error("⚠ 画像は最大30枚までにしてください。")
     else:
-        quality = st.slider("圧縮品質（JPEG/WebP用）", 10, 95, 70)
+        quality = st.slider("🔧 JPEG/WebP 圧縮品質", min_value=10, max_value=95, value=70)
+
         zip_buffer = io.BytesIO()
         total_original_kb = 0
         total_compressed_kb = 0
 
         with zipfile.ZipFile(zip_buffer, "w") as zipf:
-            for uploaded_file in uploaded_files:
+            cols = st.columns(3)
+            for i, uploaded_file in enumerate(uploaded_files):
+                with cols[i % 3]:
+                    st.image(uploaded_file, caption=uploaded_file.name, use_column_width=True)
+
+                original_data = uploaded_file.getvalue()
+                original_size_kb = len(original_data) // 1024
+                total_original_kb += original_size_kb
+
                 try:
-                    image = Image.open(uploaded_file)
+                    image = Image.open(io.BytesIO(original_data))
                     format = image.format or "JPEG"
-                    original_data = uploaded_file.getvalue()
-                    original_size_kb = len(original_data) // 1024
-                    total_original_kb += original_size_kb
 
                     if image.mode in ("RGBA", "P"):
                         image = image.convert("RGB")
@@ -57,17 +61,16 @@ if uploaded_files:
                     total_compressed_kb += compressed_size_kb
 
                     zipf.writestr(f"compressed_{uploaded_file.name}", compressed_data)
-
-                    st.write(
-                        f"🖼️ {uploaded_file.name}: {original_size_kb}KB → {compressed_size_kb}KB"
-                    )
+                    st.write(f"✅ {uploaded_file.name}: {original_size_kb}KB → {compressed_size_kb}KB")
                 except Exception as e:
-                    st.error(f"{uploaded_file.name}: 圧縮エラー - {e}")
+                    st.error(f"❌ {uploaded_file.name}: 圧縮エラー - {e}")
 
         zip_buffer.seek(0)
-        st.success(f"✅ 圧縮完了: 合計 {total_original_kb}KB → {total_compressed_kb}KB")
+        st.markdown("---")
+        st.success(f"🎉 圧縮完了: 合計 {total_original_kb}KB → {total_compressed_kb}KB")
+
         st.download_button(
-            label="📦 圧縮画像（ZIP）をダウンロード",
+            label="📦 圧縮済みZIPファイルをダウンロード",
             data=zip_buffer,
             file_name="compressed_images.zip",
             mime="application/zip"
