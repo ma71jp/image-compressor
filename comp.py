@@ -1,71 +1,86 @@
-import tkinter as tk
-from tkinter import filedialog, messagebox
+import streamlit as st
 from PIL import Image
 import io
-import os
+import zipfile
 
+# ✅ 追加：HEIC対応
+from pillow_heif import register_heif_opener
+register_heif_opener()
 
-def compress_image(input_path, quality=75):
-    try:
-        with Image.open(input_path) as img:
-            format = img.format  # 元のフォーマットを保持
+st.set_page_config(page_title="画像一括圧縮ツール", layout="wide")
+st.title("📷 画像一括圧縮ツール")
+st.caption("※ 画像は保存されません。最大30枚、解像度そのまま。JPEG/PNG/BMP/WebP/HEIC対応")
 
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
+uploaded_files = st.file_uploader(
+    "📁 圧縮したい画像ファイルを選んでください（複数選択可）",
+    # ✅ ここに heic を追加
+    type=["jpg", "jpeg", "png", "bmp", "webp", "heic"],
+    accept_multiple_files=True
+)
 
-            output_io = io.BytesIO()
+if uploaded_files:
+    if len(uploaded_files) > 30:
+        st.error("⚠ 画像は最大30枚までにしてください。")
+    else:
+        quality = st.slider("🔧 JPEG/WebP 圧縮品質", min_value=10, max_value=95, value=70)
 
-            # JPEG以外の形式にも対応
-            save_kwargs = {}
-            if format == "JPEG":
-                save_kwargs = {'quality': quality, 'optimize': True}
-            elif format == "PNG":
-                save_kwargs = {'optimize': True, 'compress_level': 9}
-            elif format == "WEBP":
-                save_kwargs = {'quality': quality}
-            else:
-                format = "JPEG"  # その他形式はJPEGとして保存
-                save_kwargs = {'quality': quality, 'optimize': True}
+        zip_buffer = io.BytesIO()
+        total_original_kb = 0
+        total_compressed_kb = 0
 
-            img.save(output_io, format=format, **save_kwargs)
-            return output_io.getvalue(), format
-    except Exception as e:
-        messagebox.showerror("エラー", f"画像の圧縮中にエラーが発生しました:\n{e}")
-        return None, None
+        with zipfile.ZipFile(zip_buffer, "w") as zipf:
+            cols = st.columns(3)
+            for i, uploaded_file in enumerate(uploaded_files):
+                with cols[i % 3]:
+                    st.image(uploaded_file, caption=uploaded_file.name, use_column_width=True)
 
+                original_data = uploaded_file.getvalue()
+                original_size_kb = len(original_data) // 1024
+                total_original_kb += original_size_kb
 
-def select_and_compress():
-    file_path = filedialog.askopenfilename(
-        filetypes=[("画像ファイル", "*.jpg *.jpeg *.png *.bmp *.tiff *.webp")]
-    )
+                try:
+                    # ✅ HEIC対応は register_heif_opener() 済みなのでそのまま open でOK
+                    image = Image.open(io.BytesIO(original_data))
+                    format = (image.format or "JPEG").upper()
 
-    if not file_path:
-        return
+                    if image.mode in ("RGBA", "P"):
+                        image = image.convert("RGB")
 
-    compressed_data, fmt = compress_image(file_path, quality=70)
+                    output = io.BytesIO()
+                    save_format = format
+                    save_kwargs = {}
 
-    if compressed_data:
-        original_size = os.path.getsize(file_path)
-        compressed_size = len(compressed_data)
+                    # ✅ HEIC/HEIF は JPEG として保存（汎用性重視）
+                    if save_format in ["HEIC", "HEIF"]:
+                        save_format = "JPEG"
+                        save_kwargs = {'quality': quality, 'optimize': True}
+                    elif save_format in ["JPEG", "JPG"]:
+                        save_kwargs = {'quality': quality, 'optimize': True}
+                    elif save_format == "PNG":
+                        save_kwargs = {'optimize': True, 'compress_level': 9}
+                    elif save_format == "WEBP":
+                        save_kwargs = {'quality': quality}
+                    elif save_format in ["TIFF", "BMP"]:
+                        save_format = "JPEG"
+                        save_kwargs = {'quality': quality, 'optimize': True}
 
-        size_info = f"元のサイズ: {original_size // 1024} KB\n圧縮後のサイズ: {compressed_size // 1024} KB\n形式: {fmt}"
-        messagebox.showinfo("圧縮完了", size_info)
+                    image.save(output, format=save_format, **save_kwargs)
+                    compressed_data = output.getvalue()
+                    compressed_size_kb = len(compressed_data) // 1024
+                    total_compressed_kb += compressed_size_kb
 
+                    zipf.writestr(f"compressed_{uploaded_file.name}", compressed_data)
+                    st.write(f"✅ {uploaded_file.name}: {original_size_kb}KB → {compressed_size_kb}KB")
+                except Exception as e:
+                    st.error(f"❌ {uploaded_file.name}: 圧縮エラー - {e}")
 
-def create_gui():
-    root = tk.Tk()
-    root.title("画像圧縮ツール")
-    root.geometry("300x150")
-    root.resizable(False, False)
+        zip_buffer.seek(0)
+        st.markdown("---")
+        st.success(f"🎉 圧縮完了: 合計 {total_original_kb}KB → {total_compressed_kb}KB")
 
-    label = tk.Label(root, text="画像ファイルを選択して圧縮")
-    label.pack(pady=20)
-
-    compress_btn = tk.Button(root, text="画像を選択して圧縮", command=select_and_compress)
-    compress_btn.pack(pady=10)
-
-    root.mainloop()
-
-
-if __name__ == "__main__":
-    create_gui()
+        st.download_button(
+            label="📦 圧縮済みZIPファイルをダウンロード",
+            data=zip_buffer,
+            file_name="compressed_images.zip",
+            mime="application/zip"
+        )

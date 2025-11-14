@@ -1,16 +1,20 @@
-# improved_image_compressor.py
 import streamlit as st
 from PIL import Image
 import io
 import zipfile
 
+# ✅ 追加：HEIC対応
+from pillow_heif import register_heif_opener
+register_heif_opener()
+
 st.set_page_config(page_title="画像一括圧縮ツール", layout="wide")
 st.title("📷 画像一括圧縮ツール")
-st.caption("※ 画像は保存されません。最大30枚、解像度そのまま。JPEG/PNG/BMP/WebP対応")
+st.caption("※ 画像は保存されません。最大30枚、解像度そのまま。JPEG/PNG/BMP/WebP/HEIC対応")
 
 uploaded_files = st.file_uploader(
     "📁 圧縮したい画像ファイルを選んでください（複数選択可）",
-    type=["jpg", "jpeg", "png", "bmp", "webp"],
+    # ✅ ここに heic を追加
+    type=["jpg", "jpeg", "png", "bmp", "webp", "heic"],
     accept_multiple_files=True
 )
 
@@ -35,17 +39,22 @@ if uploaded_files:
                 total_original_kb += original_size_kb
 
                 try:
+                    # ✅ HEIC対応は register_heif_opener() 済みなのでそのまま open でOK
                     image = Image.open(io.BytesIO(original_data))
-                    format = image.format or "JPEG"
+                    format = (image.format or "JPEG").upper()
 
                     if image.mode in ("RGBA", "P"):
                         image = image.convert("RGB")
 
                     output = io.BytesIO()
-                    save_format = format.upper()
+                    save_format = format
                     save_kwargs = {}
 
-                    if save_format in ["JPEG", "JPG"]:
+                    # ✅ HEIC/HEIF は JPEG として保存（汎用性重視）
+                    if save_format in ["HEIC", "HEIF"]:
+                        save_format = "JPEG"
+                        save_kwargs = {'quality': quality, 'optimize': True}
+                    elif save_format in ["JPEG", "JPG"]:
                         save_kwargs = {'quality': quality, 'optimize': True}
                     elif save_format == "PNG":
                         save_kwargs = {'optimize': True, 'compress_level': 9}
